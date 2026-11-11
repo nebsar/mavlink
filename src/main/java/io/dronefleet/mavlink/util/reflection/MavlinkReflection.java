@@ -4,10 +4,39 @@ import io.dronefleet.mavlink.annotations.MavlinkEntryInfo;
 import io.dronefleet.mavlink.annotations.MavlinkMessageInfo;
 
 import java.lang.reflect.Field;
-import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 
 public class MavlinkReflection {
+
+    private static final ClassValue<EnumMetadata> ENUM_METADATA = new ClassValue<EnumMetadata>() {
+        @Override
+        protected EnumMetadata computeValue(Class<?> type) {
+            Map<Enum, MavlinkEntryInfo> entries = new HashMap<>();
+            Map<Integer, Enum> values = new HashMap<>();
+            for (Field field : type.getFields()) {
+                if (!field.isEnumConstant()) {
+                    continue;
+                }
+
+                MavlinkEntryInfo info = field.getAnnotation(MavlinkEntryInfo.class);
+                if (info == null) {
+                    continue;
+                }
+
+                try {
+                    Enum constant = (Enum) field.get(null);
+                    entries.put(constant, info);
+                    values.putIfAbsent(info.value(), constant);
+                } catch (IllegalAccessException e) {
+                    throw new IllegalStateException("Unable to read enum constant " + field, e);
+                }
+            }
+            return new EnumMetadata(entries, values);
+        }
+    };
 
     public static int getEnumValue(Enum entry) {
         return getEnumEntry(entry)
@@ -17,34 +46,11 @@ public class MavlinkReflection {
     }
 
     public static Optional<MavlinkEntryInfo> getEnumEntry(Enum entry) {
-        return Arrays.stream(entry.getDeclaringClass().getFields())
-                .filter(Field::isEnumConstant)
-                .filter(f -> f.isAnnotationPresent(MavlinkEntryInfo.class))
-                .filter(f -> {
-                    try {
-                        return entry.equals(f.get(null));
-                    } catch (IllegalAccessException e) {
-                        return false;
-                    }
-                })
-                .findFirst()
-                .map(f -> f.getAnnotation(MavlinkEntryInfo.class));
+        return Optional.ofNullable(ENUM_METADATA.get(entry.getDeclaringClass()).entries.get(entry));
     }
 
     public static <T extends Enum> Optional<T> getEntryByValue(Class<T> enumType, int value) {
-        return Arrays.stream(enumType.getFields())
-                .filter(Field::isEnumConstant)
-                .filter(f -> f.isAnnotationPresent(MavlinkEntryInfo.class))
-                .filter(f -> f.getAnnotation(MavlinkEntryInfo.class).value() == value)
-                .map(f -> {
-                    try {
-                        return f.get(null);
-                    } catch (IllegalAccessException e) {
-                        throw new IllegalStateException(e);
-                    }
-                })
-                .map(enumType::cast)
-                .findFirst();
+        return Optional.ofNullable(enumType.cast(ENUM_METADATA.get(enumType).values.get(value)));
     }
 
     public static boolean isMavlinkMessage(Object o) {
@@ -53,5 +59,15 @@ public class MavlinkReflection {
 
     public static Optional<MavlinkMessageInfo> getMessageInfo(Object message) {
         return Optional.ofNullable(message.getClass().getAnnotation(MavlinkMessageInfo.class));
+    }
+
+    private static final class EnumMetadata {
+        private final Map<Enum, MavlinkEntryInfo> entries;
+        private final Map<Integer, Enum> values;
+
+        private EnumMetadata(Map<Enum, MavlinkEntryInfo> entries, Map<Integer, Enum> values) {
+            this.entries = Collections.unmodifiableMap(entries);
+            this.values = Collections.unmodifiableMap(values);
+        }
     }
 }

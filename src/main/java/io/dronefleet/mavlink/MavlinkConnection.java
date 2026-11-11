@@ -20,10 +20,10 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -63,7 +63,6 @@ public class MavlinkConnection {
                     .dialect(MavAutopilot.MAV_AUTOPILOT_AUTOQUAD, new AutoquadDialect())
                     .dialect(MavAutopilot.MAV_AUTOPILOT_ASLUAV, new AsluavDialect())
                     .dialect(MavAutopilot.MAV_AUTOPILOT_SLUGS, new SlugsDialect())
-                    .dialect(MavAutopilot.MAV_AUTOPILOT_AUTOQUAD, new AutoquadDialect())
                     .dialect(MavAutopilot.MAV_AUTOPILOT_PPZ, new PaparazziDialect());
             defaultDialect = COMMON_DIALECT;
         }
@@ -77,7 +76,8 @@ public class MavlinkConnection {
          * @return This builder.
          */
         public Builder dialect(MavAutopilot autopilot, MavlinkDialect dialect) {
-            dialects.put(autopilot, dialect);
+            dialects.put(Objects.requireNonNull(autopilot, "autopilot"),
+                    Objects.requireNonNull(dialect, "dialect"));
             return this;
         }
 
@@ -90,7 +90,7 @@ public class MavlinkConnection {
          * @return This builder.
          */
         public Builder defaultDialect(MavlinkDialect dialect) {
-            defaultDialect = dialect;
+            defaultDialect = Objects.requireNonNull(dialect, "dialect");
             return this;
         }
 
@@ -113,7 +113,7 @@ public class MavlinkConnection {
      * The default dialect for systems which have not yet been associated
      * with a specific dialect.
      */
-    private static MavlinkDialect COMMON_DIALECT = new CommonDialect();
+    private static final MavlinkDialect COMMON_DIALECT = new CommonDialect();
 
     /**
      * Creates a new builder for the specified input/output streams.
@@ -202,11 +202,11 @@ public class MavlinkConnection {
             MavlinkPayloadSerializer serializer) {
         this.reader = reader;
         this.out = out;
-        this.dialects = dialects;
+        this.dialects = new HashMap<>(dialects);
         this.defaultDialect = defaultDialect;
         this.deserializer = deserializer;
         this.serializer = serializer;
-        systemDialects = new HashMap<>();
+        systemDialects = new ConcurrentHashMap<>();
         readLock = new ReentrantLock();
         writeLock = new ReentrantLock();
     }
@@ -237,9 +237,11 @@ public class MavlinkConnection {
         try {
             MavlinkPacket packet;
             while ((packet = reader.next()) != null) {
-                Class<?> messageType = getMessageType(packet, Arrays.asList(
-                        systemDialects.getOrDefault(packet.getSystemId(), defaultDialect),
-                        COMMON_DIALECT));
+                MavlinkDialect dialect = systemDialects.getOrDefault(packet.getSystemId(), defaultDialect);
+                Class<?> messageType = getMessageType(packet, dialect);
+                if (messageType == null && dialect != COMMON_DIALECT) {
+                    messageType = getMessageType(packet, COMMON_DIALECT);
+                }
                 if (messageType != null) {
                     Object payload = deserializer.deserialize(packet.getPayload(), messageType);
                     if (payload instanceof Heartbeat) {
@@ -383,16 +385,6 @@ public class MavlinkConnection {
      * @return The message type according to the specified dialects, or {@code null}
      * if the packet does not represent a message in any of the specified dialects.
      */
-    private Class<?> getMessageType(MavlinkPacket packet, List<MavlinkDialect> dialects) {
-        for (MavlinkDialect dialect : dialects) {
-            Class<?> messageType = getMessageType(packet, dialect);
-            if (messageType != null) {
-                return messageType;
-            }
-        }
-        return null;
-    }
-
     /**
      * @param packet  The packet for which to resolve the message type.
      * @param dialect The dialect to use in order to resolve the message type.
@@ -400,10 +392,13 @@ public class MavlinkConnection {
      * if the packet does not represent a message of the specified dialect.
      */
     private Class<?> getMessageType(MavlinkPacket packet, MavlinkDialect dialect) {
-        if (dialect.supports(packet.getMessageId())) {
+        if (dialect != null) {
             Class<?> messageType = dialect.resolve(packet.getMessageId());
+            if (messageType == null) {
+                return null;
+            }
             MavlinkMessageInfo messageInfo = messageType.getAnnotation(MavlinkMessageInfo.class);
-            if (packet.validateCrc(messageInfo.crc())) {
+            if (messageInfo != null && packet.validateCrc(messageInfo.crc())) {
                 return messageType;
             }
         }

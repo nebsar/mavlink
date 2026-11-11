@@ -1,6 +1,5 @@
 package io.dronefleet.mavlink.serialization.payload.reflection;
 
-import io.dronefleet.mavlink.annotations.MavlinkEntryInfo;
 import io.dronefleet.mavlink.annotations.MavlinkFieldInfo;
 import io.dronefleet.mavlink.annotations.MavlinkMessageInfo;
 import io.dronefleet.mavlink.serialization.MavlinkSerializationException;
@@ -10,17 +9,31 @@ import io.dronefleet.mavlink.util.WireFieldInfoComparator;
 import io.dronefleet.mavlink.util.reflection.MavlinkReflection;
 
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class ReflectionPayloadSerializer implements MavlinkPayloadSerializer {
 
     private static final WireFieldInfoComparator wireComparator = new WireFieldInfoComparator();
+    private static final ClassValue<List<SerializedField>> FIELDS = new ClassValue<List<SerializedField>>() {
+        @Override
+        protected List<SerializedField> computeValue(Class<?> messageClass) {
+            List<SerializedField> fields = new ArrayList<>();
+            Arrays.stream(messageClass.getMethods())
+                    .filter(method -> method.isAnnotationPresent(MavlinkFieldInfo.class))
+                    .forEach(method -> fields.add(new SerializedField(
+                            method, method.getAnnotation(MavlinkFieldInfo.class))));
+            fields.sort(Comparator.comparing(SerializedField::getInfo, wireComparator));
+            return fields;
+        }
+    };
 
     @Override
     public byte[] serialize(Object message) {
@@ -29,41 +42,45 @@ public class ReflectionPayloadSerializer implements MavlinkPayloadSerializer {
             throw new IllegalArgumentException(messageClass.getName() + " is not annotated with @MavlinkMessageInfo");
         }
 
-        int payloadLength = Arrays.stream(messageClass.getMethods())
-                .filter(m -> m.isAnnotationPresent(MavlinkFieldInfo.class))
-                .map(m -> m.getAnnotation(MavlinkFieldInfo.class))
-                .mapToInt(f -> f.unitSize() * Math.max(1, f.arraySize()))
+        List<SerializedField> fields = FIELDS.get(messageClass);
+        int payloadLength = fields.stream()
+                .mapToInt(field -> field.info.unitSize() * Math.max(1, field.info.arraySize()))
                 .sum();
         if (payloadLength > 255) {
             throw new IllegalStateException("payload length > 255 for message" + messageClass.getName());
         }
         byte[] payload = new byte[payloadLength];
 
-        AtomicInteger nextOffset = new AtomicInteger(0);
-
-        Arrays.stream(messageClass.getMethods())
-                .filter(m -> m.isAnnotationPresent(MavlinkFieldInfo.class))
-                .sorted((a, b) -> {
-                    MavlinkFieldInfo fa = a.getAnnotation(MavlinkFieldInfo.class);
-                    MavlinkFieldInfo fb = b.getAnnotation(MavlinkFieldInfo.class);
-                    return wireComparator.compare(fa, fb);
-                })
-                .forEach(m -> {
-                    MavlinkFieldInfo field = m.getAnnotation(MavlinkFieldInfo.class);
-                    int length = field.unitSize() * Math.max(field.arraySize(), 1);
-                    int offset = nextOffset.getAndAccumulate(length, (a, b) -> a + b);
-                    length += offset;
-                    try {
-                        Object fieldValue = m.invoke(message);
-                        if (fieldValue != null) {
-                            write(fieldValue, payload, offset, length, field.unitSize());
-                        }
-                    } catch (IllegalAccessException | InvocationTargetException e) {
-                        throw new IllegalStateException(e);
-                    }
-                });
+        int offset = 0;
+        for (SerializedField serializedField : fields) {
+            MavlinkFieldInfo field = serializedField.info;
+            int length = field.unitSize() * Math.max(field.arraySize(), 1);
+            try {
+                Object fieldValue = serializedField.method.invoke(message);
+                if (fieldValue != null) {
+                    write(fieldValue, payload, offset, offset + length, field.unitSize());
+                }
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new IllegalStateException("Unable to serialize field " + serializedField.method, e);
+            }
+            offset += length;
+        }
 
         return payload;
+    }
+
+    private static final class SerializedField {
+        private final Method method;
+        private final MavlinkFieldInfo info;
+
+        private SerializedField(Method method, MavlinkFieldInfo info) {
+            this.method = method;
+            this.info = info;
+        }
+
+        private MavlinkFieldInfo getInfo() {
+            return info;
+        }
     }
 
     private void write(Object value, byte[] buffer, int offset, int length, int unitSize) {
@@ -118,9 +135,7 @@ public class ReflectionPayloadSerializer implements MavlinkPayloadSerializer {
     }
 
     private void write(Enum value, byte[] buffer, int offset, int length) {
-        MavlinkReflection.getEnumEntry(value)
-                .map(MavlinkEntryInfo::value)
-                .ifPresent(e -> write(e, buffer, offset, length));
+        write(MavlinkReflection.getEnumValue(value), buffer, offset, length);
     }
 
     private void write(EnumValue<? extends Enum> value, byte[] buffer, int offset, int length) {

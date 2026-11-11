@@ -9,6 +9,7 @@ import io.dronefleet.mavlink.util.EnumValue;
 import io.dronefleet.mavlink.util.WireFieldInfoComparator;
 
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.math.BigInteger;
@@ -16,11 +17,42 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class ReflectionPayloadDeserializer implements MavlinkPayloadDeserializer {
 
     private static final WireFieldInfoComparator wireComparator = new WireFieldInfoComparator();
+    private static final ClassValue<Method> BUILDERS = new ClassValue<Method>() {
+        @Override
+        protected Method computeValue(Class<?> messageType) {
+            return Arrays.stream(messageType.getMethods())
+                    .filter(method -> method.isAnnotationPresent(MavlinkMessageBuilder.class))
+                    .findFirst()
+                    .orElseThrow(() -> new MavlinkSerializationException(
+                            "Message " + messageType.getName() + " does not have a builder"));
+        }
+    };
+    private static final ClassValue<List<DeserializedField>> FIELDS =
+            new ClassValue<List<DeserializedField>>() {
+                @Override
+                protected List<DeserializedField> computeValue(Class<?> builderType) {
+                    List<DeserializedField> fields = new ArrayList<>();
+                    Arrays.stream(builderType.getMethods())
+                            .filter(method -> method.isAnnotationPresent(MavlinkFieldInfo.class))
+                            .forEach(method -> {
+                                Type[] parameterTypes = method.getGenericParameterTypes();
+                                if (parameterTypes.length != 1) {
+                                    throw new MavlinkSerializationException(
+                                            "Method " + method.getName() + " of " + builderType.getName()
+                                                    + " is annotated with @MavlinkFieldInfo, however does not "
+                                                    + "accept a single parameter.");
+                                }
+                                fields.add(new DeserializedField(method,
+                                        method.getAnnotation(MavlinkFieldInfo.class), parameterTypes[0]));
+                            });
+                    fields.sort((a, b) -> wireComparator.compare(a.info, b.info));
+                    return fields;
+                }
+            };
 
     @Override
     public <T> T deserialize(byte[] payload, Class<T> messageType) {
@@ -30,57 +62,59 @@ public class ReflectionPayloadDeserializer implements MavlinkPayloadDeserializer
                     "class %s is not annotated with @MavlinkMessageInfo", messageType.getName()));
         }
 
+        Object builder;
         try {
-            Object builder = Arrays.stream(messageType.getMethods())
-                    .filter(m -> m.isAnnotationPresent(MavlinkMessageBuilder.class))
-                    .findFirst()
-                    .orElseThrow(() -> new MavlinkSerializationException(
-                            "Message " + messageType.getName() + " does not have a builder"))
-                    .invoke(null);
+            builder = BUILDERS.get(messageType).invoke(null);
+        } catch (IllegalAccessException | InvocationTargetException e) {
+            throw serializationFailure("Unable to create builder for " + messageType.getName(), e);
+        }
 
-            AtomicInteger nextOffset = new AtomicInteger();
-            Arrays.stream(builder.getClass().getMethods())
-                    .filter(m -> m.isAnnotationPresent(MavlinkFieldInfo.class))
-                    .sorted((a, b) -> {
-                        MavlinkFieldInfo fa = a.getAnnotation(MavlinkFieldInfo.class);
-                        MavlinkFieldInfo fb = b.getAnnotation(MavlinkFieldInfo.class);
-                        return wireComparator.compare(fa, fb);
-                    })
-                    .forEach(method -> {
-                        MavlinkFieldInfo field = method.getAnnotation(MavlinkFieldInfo.class);
+        int offset = 0;
+        for (DeserializedField deserializedField : FIELDS.get(builder.getClass())) {
+            MavlinkFieldInfo field = deserializedField.info;
+            int length = field.unitSize() * Math.max(field.arraySize(), 1);
+            byte[] data = new byte[length];
+            if (offset < payload.length) {
+                int copyLength = Math.min(length, payload.length - offset);
+                System.arraycopy(payload, offset, data, 0, copyLength);
+            }
 
-                        int length = field.unitSize() * Math.max(field.arraySize(), 1);
-                        int offset = nextOffset.getAndAccumulate(length, (a, b) -> a + b);
+            try {
+                deserializedField.method.invoke(builder,
+                        deserialize(deserializedField.type, data, 0, data.length, field));
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw serializationFailure("Unable to deserialize field "
+                        + deserializedField.method.getName() + " of " + messageType.getName(), e);
+            }
+            offset += length;
+        }
 
-                        byte[] data = new byte[length];
-                        if (offset < payload.length) {
-                            int copyLength = Math.max(
-                                    Math.min(length, payload.length - offset),
-                                    0
-                            );
-                            System.arraycopy(payload, offset, data, 0, copyLength);
-                        }
-
-                        Type fieldType = Optional.of(method.getGenericParameterTypes())
-                                .filter(types -> types.length == 1)
-                                .map(types -> types[0])
-                                .orElseThrow(() -> new MavlinkSerializationException(
-                                        "Method " + method.getName() + " of " + builder.getClass().getName()
-                                                + " is annotated with @MavlinkFieldInfo, however does not " +
-                                                "accept a single parameter."));
-                        try {
-                            method.invoke(builder, deserialize(fieldType, data, 0, data.length, field));
-                        } catch (IllegalAccessException | InvocationTargetException e) {
-                            e.printStackTrace();
-                        }
-                    });
-
+        try {
             //noinspection unchecked
             return (T) builder.getClass().getMethod("build").invoke(builder);
         } catch (IllegalAccessException | InvocationTargetException | NoSuchMethodException e) {
-            e.printStackTrace();
+            throw serializationFailure("Unable to build message " + messageType.getName(), e);
         }
-        return null;
+    }
+
+    private static MavlinkSerializationException serializationFailure(String message, Exception cause) {
+        Throwable actualCause = cause instanceof InvocationTargetException
+                && ((InvocationTargetException) cause).getCause() != null
+                ? ((InvocationTargetException) cause).getCause()
+                : cause;
+        return new MavlinkSerializationException(message, actualCause);
+    }
+
+    private static final class DeserializedField {
+        private final Method method;
+        private final MavlinkFieldInfo info;
+        private final Type type;
+
+        private DeserializedField(Method method, MavlinkFieldInfo info, Type type) {
+            this.method = method;
+            this.info = info;
+            this.type = type;
+        }
     }
 
     private Object deserialize(Type fieldType, byte[] data, int offset, int length, MavlinkFieldInfo field) {
@@ -110,7 +144,7 @@ public class ReflectionPayloadDeserializer implements MavlinkPayloadDeserializer
                 return listValue((Class<?>) parameterizedType.getActualTypeArguments()[0], data, field);
             }
         }
-        return null;
+        throw new MavlinkSerializationException("Unsupported field type " + fieldType);
     }
 
     private long unsignedIntegerValue(byte[] data, int offset, int length) {

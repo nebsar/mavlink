@@ -1,6 +1,7 @@
 package io.dronefleet.mavlink.protocol.util;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Objects;
 
 public class CrcX25 {
     private int crc;
@@ -17,8 +18,12 @@ public class CrcX25 {
         accumulate(bytes, 0, bytes.length);
     }
 
+    /**
+     * Accumulates {@code length} bytes starting at {@code offset}.
+     */
     public void accumulate(byte[] bytes, int offset, int length) {
-        for (int i = offset; i < length; i++) {
+        Objects.checkFromIndexSize(offset, length, bytes.length);
+        for (int i = offset, end = offset + length; i < end; i++) {
             accumulate(bytes[i]);
         }
     }

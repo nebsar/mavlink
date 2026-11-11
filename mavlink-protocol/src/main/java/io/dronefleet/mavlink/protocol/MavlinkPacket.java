@@ -16,6 +16,13 @@ public class MavlinkPacket {
     static final int MAGIC_V1 = 0xFE;
     static final int MAGIC_V2 = 0xFD;
     private static final int INCOMPAT_FLAG_SIGNED = 0x01;
+    private static final ThreadLocal<MessageDigest> SHA_256 = ThreadLocal.withInitial(() -> {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("JVM does not have an implementation of SHA-256 available.", e);
+        }
+    });
 
     /**
      * Creates a signed Mavlink 2 packet.
@@ -190,7 +197,7 @@ public class MavlinkPacket {
         }
         packetLengthWithoutCrc += payloadLength;
         CrcX25 crc = new CrcX25();
-        crc.accumulate(packetBytes, 1, packetLengthWithoutCrc);
+        crc.accumulate(packetBytes, 1, packetLengthWithoutCrc - 1);
         crc.accumulate(crcExtra);
         return crc.get();
     }
@@ -207,7 +214,7 @@ public class MavlinkPacket {
     public static byte[] generateSignature(
             byte[] packetBytes, int linkId, long timestamp, byte[] secretKey) {
         if (packetBytes.length < 3
-                || (packetBytes[0] & MavlinkPacket.MAGIC_V2) != MavlinkPacket.MAGIC_V2
+                || (packetBytes[0] & 0xff) != MavlinkPacket.MAGIC_V2
                 || (packetBytes[2] & MavlinkPacket.INCOMPAT_FLAG_SIGNED) == 0) {
             return new byte[0];
         }
@@ -220,17 +227,13 @@ public class MavlinkPacket {
         ByteArray bytes = new ByteArray(signature);
         bytes.putInt8(linkId, 0);
         bytes.putInt48(timestamp, 1);
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            digest.update(secretKey);
-            digest.update(packetBytes, 0, packetLengthWithCrc);
-            digest.update(signature, 0, 7);
-            byte[] hash = digest.digest();
-            System.arraycopy(hash, 0, signature, 7, 6);
-            return signature;
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("JVM does not have an implementation of SHA-256 available.");
-        }
+        MessageDigest digest = SHA_256.get();
+        digest.update(secretKey);
+        digest.update(packetBytes, 0, packetLengthWithCrc);
+        digest.update(signature, 0, 7);
+        byte[] hash = digest.digest();
+        System.arraycopy(hash, 0, signature, 7, 6);
+        return signature;
     }
 
     private final int versionMarker;
