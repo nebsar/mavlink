@@ -39,6 +39,13 @@ Maven Central coordinates are `io.dronefleet.mavlink:mavlink:1.1.11`
 The project requires JDK 17. Run the test suite with `./gradlew test` (or
 `gradlew.bat test` on Windows).
 
+## MAVLink definitions
+
+The dialect XML files in `definition-xml` are synchronized with
+[MAVLink upstream](https://github.com/mavlink/mavlink) at commit
+[`ffee743`](https://github.com/mavlink/mavlink/commit/ffee743eae870c018a82b2777d11977e1280d39f).
+Legacy dialects no longer present upstream are retained.
+
 ## Examples
 
 #### Brief
