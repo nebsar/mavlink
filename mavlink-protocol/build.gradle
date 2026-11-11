@@ -1,4 +1,5 @@
-group 'io.dronefleet.mavlink'
+group = System.getenv('JITPACK') == 'true' ?
+        "${rootProject.group}.${rootProject.name}" : rootProject.group
 
 apply plugin: 'java'
 apply from: rootProject.file('sonatype.gradle')

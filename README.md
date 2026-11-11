@@ -39,6 +39,47 @@ Maven Central coordinates are `io.dronefleet.mavlink:mavlink:1.1.11`
 The project requires JDK 17. Run the test suite with `./gradlew test` (or
 `gradlew.bat test` on Windows).
 
+### Use from another Gradle project
+
+After pushing this branch to GitHub, add JitPack to the consuming project's
+repositories and depend on the branch snapshot:
+
+```groovy
+repositories {
+    mavenCentral()
+    maven { url 'https://jitpack.io' }
+}
+
+dependencies {
+    implementation 'com.github.nebsar:mavlink:mavlink-updated-SNAPSHOT'
+}
+```
+
+For reproducible builds, use a pushed commit hash or release tag instead of the
+branch snapshot.
+
+### Use from another Maven project
+
+Add JitPack as a repository and use the same branch snapshot as the dependency
+version:
+
+```xml
+<repositories>
+  <repository>
+    <id>jitpack.io</id>
+    <url>https://jitpack.io</url>
+  </repository>
+</repositories>
+
+<dependencies>
+  <dependency>
+    <groupId>com.github.nebsar</groupId>
+    <artifactId>mavlink</artifactId>
+    <version>mavlink-updated-SNAPSHOT</version>
+  </dependency>
+</dependencies>
+```
+
 ## MAVLink definitions
 
 The dialect XML files in `definition-xml` are synchronized with

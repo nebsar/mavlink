@@ -76,6 +76,8 @@ publishing {
     }
 }
 
-signing {
-    sign publishing.publications
+if (System.getenv('JITPACK') != 'true') {
+    signing {
+        sign publishing.publications
+    }
 }
