@@ -3,12 +3,16 @@ group 'io.dronefleet.mavlink'
 apply plugin: 'java'
 apply from: rootProject.file('sonatype.gradle')
 
-sourceCompatibility = 1.8
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
 
 repositories {
     mavenCentral()
 }
 
 dependencies {
-    testCompile group: 'junit', name: 'junit', version: '4.12'
+    testImplementation group: 'junit', name: 'junit', version: '4.12'
 }

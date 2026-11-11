@@ -1,5 +1,5 @@
-apply plugin: 'maven'
 apply plugin: 'signing'
+apply plugin: 'maven-publish'
 
 version = rootProject.version
 
@@ -16,65 +16,66 @@ ext."signing.keyId" = envOrProperty('SIGNING_KEYID', 'signing.keyId', '')
 ext."signing.password" = envOrProperty('SIGNING_PASSWORD', 'signing.password', '')
 ext."signing.secretKeyRingFile" = envOrProperty('SIGNING_SECRETKEYRINGFILE', 'signing.secretKeyRingFile', rootProject.file("secring.gpg").absolutePath)
 
-task javadocJar(type: Jar) {
-    classifier = 'javadoc'
+tasks.register('javadocJar', Jar) {
+    archiveClassifier = 'javadoc'
     from javadoc
 }
 
-task sourcesJar(type: Jar) {
-    classifier = 'sources'
+tasks.register('sourcesJar', Jar) {
+    archiveClassifier = 'sources'
     from sourceSets.main.allSource
 }
 
-artifacts {
-    archives javadocJar, sourcesJar
-}
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            artifact tasks.named('javadocJar')
+            artifact tasks.named('sourcesJar')
 
-signing {
-    sign configurations.archives
-}
-
-uploadArchives {
-    repositories {
-        mavenDeployer {
-            beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
-
-            repository(url: "https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
-                authentication(userName: ossrhUsername, password: ossrhPassword)
-            }
-
-            snapshotRepository(url: "https://oss.sonatype.org/content/repositories/snapshots/") {
-                authentication(userName: ossrhUsername, password: ossrhPassword)
-            }
-
-            pom.project {
-                name project.name
-                packaging 'jar'
-                // optionally artifactId can be defined here
-                description 'A library for communication using the Mavlink1 and Mavlink2 protocols'
-                url 'http://dronefleet.io'
+            pom {
+                name = project.name
+                description = 'A library for communication using the Mavlink1 and Mavlink2 protocols'
+                url = 'http://dronefleet.io'
 
                 scm {
-                    connection 'scm:git:git://github.com/dronefleet/mavlink.git'
-                    developerConnection 'scm:git:ssh://github.com:dronefleet/mavlink.git'
-                    url 'http://github.com/dronefleet/mavlink/tree/master'
+                    connection = 'scm:git:git://github.com/dronefleet/mavlink.git'
+                    developerConnection = 'scm:git:ssh://github.com:dronefleet/mavlink.git'
+                    url = 'http://github.com/dronefleet/mavlink/tree/master'
                 }
 
                 licenses {
                     license {
-                        name 'MIT License'
-                        url 'https://opensource.org/licenses/MIT'
+                        name = 'MIT License'
+                        url = 'https://opensource.org/licenses/MIT'
                     }
                 }
 
                 developers {
                     developer {
-                        id 'benbarkay'
-                        name 'Ben Barkay'
-                        email 'ben@dronefleet.io'
+                        id = 'benbarkay'
+                        name = 'Ben Barkay'
+                        email = 'ben@dronefleet.io'
                     }
                 }
             }
         }
     }
+
+    repositories {
+        maven {
+            name = 'sonatype'
+            url = uri(version.toString().endsWith('-SNAPSHOT') ?
+                    'https://oss.sonatype.org/content/repositories/snapshots/' :
+                    'https://oss.sonatype.org/service/local/staging/deploy/maven2/')
+            credentials {
+                username = ossrhUsername
+                password = ossrhPassword
+            }
+        }
+    }
+}
+
+signing {
+    sign publishing.publications
 }

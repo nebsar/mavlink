@@ -5,24 +5,28 @@ apply plugin: 'java'
 apply plugin: 'io.dronefleet.mavlink.generator'
 apply from: rootProject.file('sonatype.gradle')
 
-sourceCompatibility = 1.8
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
 
 repositories {
     mavenLocal()
     mavenCentral()
 }
 
-def genSrc = "src/main/java-gen"
+def genSrc = layout.buildDirectory.dir("generated/sources/mavlink/main/java")
 
 generateDialect {
     definitions file('definition-xml')
-    generatedSources file(genSrc)
+    generatedSources genSrc.get().asFile
 }
 
-sourceSets.main.java.srcDirs += genSrc
+sourceSets.main.java.srcDir genSrc
 
 dependencies {
-    compile project('mavlink-protocol')
+    implementation project('mavlink-protocol')
 
-    testCompile group: 'junit', name: 'junit', version: '4.12'
+    testImplementation group: 'junit', name: 'junit', version: '4.12'
 }

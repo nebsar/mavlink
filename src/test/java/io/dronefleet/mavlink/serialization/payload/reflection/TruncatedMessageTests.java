@@ -6,7 +6,7 @@ import io.dronefleet.mavlink.common.MissionAck;
 import io.dronefleet.mavlink.util.EnumValue;
 import org.junit.Test;
 
-import javax.xml.bind.DatatypeConverter;
+import java.util.HexFormat;
 
 import static org.junit.Assert.assertEquals;
 
@@ -16,7 +16,7 @@ public class TruncatedMessageTests {
 
     @Test
     public void testTruncatedPayloadDeserialization() {
-        byte[] payload = DatatypeConverter.parseHexBinary("ff");
+        byte[] payload = HexFormat.of().parseHex("ff");
         MissionAck message = deserializer.deserialize(payload, MissionAck.class);
 
         assertEquals(255, message.targetSystem());
@@ -27,7 +27,7 @@ public class TruncatedMessageTests {
 
     @Test
     public void testNonTruncatedPayloadDeserialization() {
-        byte[] payload = DatatypeConverter.parseHexBinary("ff000000");
+        byte[] payload = HexFormat.of().parseHex("ff000000");
         MissionAck message = deserializer.deserialize(payload, MissionAck.class);
 
         assertEquals(255, message.targetSystem());

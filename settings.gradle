@@ -1,4 +1,2 @@
 rootProject.name = 'mavlink'
-include 'buildSrc'
 include 'mavlink-protocol'
-

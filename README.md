@@ -34,6 +34,11 @@ with Mavlink devices.
 
 Maven Central coordinates are `io.dronefleet.mavlink:mavlink:1.1.11`
 
+## Build
+
+The project requires JDK 17. Run the test suite with `./gradlew test` (or
+`gradlew.bat test` on Windows).
+
 ## Examples
 
 #### Brief

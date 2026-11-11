@@ -1,10 +1,9 @@
 package io.dronefleet.mavlink;
 
-import io.dronefleet.mavlink.common.Heartbeat;
+import io.dronefleet.mavlink.minimal.Heartbeat;
 import io.dronefleet.mavlink.protocol.MavlinkPacket;
 import io.dronefleet.mavlink.serialization.payload.MavlinkPayloadSerializer;
 import io.dronefleet.mavlink.serialization.payload.reflection.ReflectionPayloadSerializer;
-import io.dronefleet.mavlink.testtool.CLibraryTestTool;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -24,21 +23,21 @@ public class CrcTests {
                 serializer.serialize(Heartbeat.builder()
                         .build()));
 
-        assertFalse(CLibraryTestTool.crcCheck(packet.getRawBytes()));
+        assertFalse(packet.validateCrc(50));
     }
 
     @Test
     public void mavlink1PacketPassesCrcCheck() {
         MavlinkPacket packet = MavlinkPacket.createMavlink1Packet(
                 1, 255, 0, 0, 50, serializer.serialize(Heartbeat.builder().build()));
-        assertTrue(CLibraryTestTool.crcCheck(packet.getRawBytes()));
+        assertTrue(packet.validateCrc(50));
     }
 
     @Test
     public void unsignedMavlink2PacketPassesCrcCheck() {
         MavlinkPacket packet = MavlinkPacket.createUnsignedMavlink2Packet(
                 1, 255, 0, 0, 50, serializer.serialize(Heartbeat.builder().build()));
-        assertTrue(CLibraryTestTool.crcCheck(packet.getRawBytes()));
+        assertTrue(packet.validateCrc(50));
     }
 
     @Test
@@ -47,6 +46,6 @@ public class CrcTests {
                 1, 255, 0, 0, 50, serializer.serialize(Heartbeat.builder().build()),
                 1, 12345L, MessageDigest.getInstance("SHA-256")
                         .digest("test".getBytes(StandardCharsets.UTF_8)));
-        assertTrue(CLibraryTestTool.crcCheck(packet.getRawBytes()));
+        assertTrue(packet.validateCrc(50));
     }
 }

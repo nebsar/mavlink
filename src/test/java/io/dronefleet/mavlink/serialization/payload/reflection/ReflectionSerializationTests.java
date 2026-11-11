@@ -2,6 +2,7 @@ package io.dronefleet.mavlink.serialization.payload.reflection;
 
 
 import io.dronefleet.mavlink.common.*;
+import io.dronefleet.mavlink.util.EnumValue;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -49,6 +50,9 @@ public class ReflectionSerializationTests {
                                         .chargeState(MavBatteryChargeState.MAV_BATTERY_CHARGE_STATE_OK)
                                         .voltages(Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
                                         .currentBattery(-5)
+                                        .voltagesExt(Arrays.asList(0, 0, 0, 0))
+                                        .mode(MavBatteryMode.MAV_BATTERY_MODE_UNKNOWN)
+                                        .faultBitmask(EnumValue.create(MavBatteryFault.class, 0))
                                         .build()
                         }
                 }
