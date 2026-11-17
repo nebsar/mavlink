@@ -8,15 +8,17 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MavlinkReflection {
 
-    private static final ClassValue<EnumMetadata> ENUM_METADATA = new ClassValue<EnumMetadata>() {
-        @Override
-        protected EnumMetadata computeValue(Class<?> type) {
+    private static final ConcurrentHashMap<Class<?>, EnumMetadata> ENUM_METADATA = new ConcurrentHashMap<>();
+
+    private static EnumMetadata getMetadata(Class<?> type) {
+        return ENUM_METADATA.computeIfAbsent(type, t -> {
             Map<Enum, MavlinkEntryInfo> entries = new HashMap<>();
             Map<Integer, Enum> values = new HashMap<>();
-            for (Field field : type.getFields()) {
+            for (Field field : t.getFields()) {
                 if (!field.isEnumConstant()) {
                     continue;
                 }
@@ -35,8 +37,8 @@ public class MavlinkReflection {
                 }
             }
             return new EnumMetadata(entries, values);
-        }
-    };
+        });
+    }
 
     public static int getEnumValue(Enum entry) {
         return getEnumEntry(entry)
@@ -46,11 +48,11 @@ public class MavlinkReflection {
     }
 
     public static Optional<MavlinkEntryInfo> getEnumEntry(Enum entry) {
-        return Optional.ofNullable(ENUM_METADATA.get(entry.getDeclaringClass()).entries.get(entry));
+        return Optional.ofNullable(getMetadata(entry.getDeclaringClass()).entries.get(entry));
     }
 
     public static <T extends Enum> Optional<T> getEntryByValue(Class<T> enumType, int value) {
-        return Optional.ofNullable(enumType.cast(ENUM_METADATA.get(enumType).values.get(value)));
+        return Optional.ofNullable(enumType.cast(getMetadata(enumType).values.get(value)));
     }
 
     public static boolean isMavlinkMessage(Object o) {

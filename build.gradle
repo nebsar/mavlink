@@ -1,5 +1,5 @@
-group = providers.gradleProperty('group').getOrElse('io.dronefleet.mavlink')
-version = providers.gradleProperty('version').getOrElse('1.1.11')
+group = providers.gradleProperty('group').getOrElse('com.github.nebsar')
+version = providers.gradleProperty('version').getOrElse('mavlink-updated-SNAPSHOT')
 
 apply plugin: 'java'
 apply plugin: 'io.dronefleet.mavlink.generator'
