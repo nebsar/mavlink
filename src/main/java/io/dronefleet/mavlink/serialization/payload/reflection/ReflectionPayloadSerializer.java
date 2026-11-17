@@ -14,26 +14,13 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.List;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ReflectionPayloadSerializer implements MavlinkPayloadSerializer {
 
     private static final WireFieldInfoComparator wireComparator = new WireFieldInfoComparator();
-    private static final ClassValue<List<SerializedField>> FIELDS = new ClassValue<List<SerializedField>>() {
-        @Override
-        protected List<SerializedField> computeValue(Class<?> messageClass) {
-            List<SerializedField> fields = new ArrayList<>();
-            Arrays.stream(messageClass.getMethods())
-                    .filter(method -> method.isAnnotationPresent(MavlinkFieldInfo.class))
-                    .forEach(method -> fields.add(new SerializedField(
-                            method, method.getAnnotation(MavlinkFieldInfo.class))));
-            fields.sort(Comparator.comparing(SerializedField::getInfo, wireComparator));
-            return fields;
-        }
-    };
+    private static final ConcurrentHashMap<Class<?>, List<SerializedField>> FIELDS = new ConcurrentHashMap<>();
 
     @Override
     public byte[] serialize(Object message) {
@@ -42,7 +29,16 @@ public class ReflectionPayloadSerializer implements MavlinkPayloadSerializer {
             throw new IllegalArgumentException(messageClass.getName() + " is not annotated with @MavlinkMessageInfo");
         }
 
-        List<SerializedField> fields = FIELDS.get(messageClass);
+        List<SerializedField> fields = FIELDS.computeIfAbsent(messageClass, type -> {
+            List<SerializedField> list = new ArrayList<>();
+            Arrays.stream(type.getMethods())
+                    .filter(method -> method.isAnnotationPresent(MavlinkFieldInfo.class))
+                    .forEach(method -> list.add(new SerializedField(
+                            method, method.getAnnotation(MavlinkFieldInfo.class))));
+            list.sort(Comparator.comparing(SerializedField::getInfo, wireComparator));
+            return list;
+        });
+
         int payloadLength = fields.stream()
                 .mapToInt(field -> field.info.unitSize() * Math.max(1, field.info.arraySize()))
                 .sum();

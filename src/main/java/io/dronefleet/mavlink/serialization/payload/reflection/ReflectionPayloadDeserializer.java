@@ -17,42 +17,13 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ReflectionPayloadDeserializer implements MavlinkPayloadDeserializer {
 
     private static final WireFieldInfoComparator wireComparator = new WireFieldInfoComparator();
-    private static final ClassValue<Method> BUILDERS = new ClassValue<Method>() {
-        @Override
-        protected Method computeValue(Class<?> messageType) {
-            return Arrays.stream(messageType.getMethods())
-                    .filter(method -> method.isAnnotationPresent(MavlinkMessageBuilder.class))
-                    .findFirst()
-                    .orElseThrow(() -> new MavlinkSerializationException(
-                            "Message " + messageType.getName() + " does not have a builder"));
-        }
-    };
-    private static final ClassValue<List<DeserializedField>> FIELDS =
-            new ClassValue<List<DeserializedField>>() {
-                @Override
-                protected List<DeserializedField> computeValue(Class<?> builderType) {
-                    List<DeserializedField> fields = new ArrayList<>();
-                    Arrays.stream(builderType.getMethods())
-                            .filter(method -> method.isAnnotationPresent(MavlinkFieldInfo.class))
-                            .forEach(method -> {
-                                Type[] parameterTypes = method.getGenericParameterTypes();
-                                if (parameterTypes.length != 1) {
-                                    throw new MavlinkSerializationException(
-                                            "Method " + method.getName() + " of " + builderType.getName()
-                                                    + " is annotated with @MavlinkFieldInfo, however does not "
-                                                    + "accept a single parameter.");
-                                }
-                                fields.add(new DeserializedField(method,
-                                        method.getAnnotation(MavlinkFieldInfo.class), parameterTypes[0]));
-                            });
-                    fields.sort((a, b) -> wireComparator.compare(a.info, b.info));
-                    return fields;
-                }
-            };
+    private static final ConcurrentHashMap<Class<?>, Method> BUILDERS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Class<?>, List<DeserializedField>> FIELDS = new ConcurrentHashMap<>();
 
     @Override
     public <T> T deserialize(byte[] payload, Class<T> messageType) {
@@ -62,15 +33,42 @@ public class ReflectionPayloadDeserializer implements MavlinkPayloadDeserializer
                     "class %s is not annotated with @MavlinkMessageInfo", messageType.getName()));
         }
 
+        Method builderMethod = BUILDERS.computeIfAbsent(messageType, type ->
+                Arrays.stream(type.getMethods())
+                        .filter(method -> method.isAnnotationPresent(MavlinkMessageBuilder.class))
+                        .findFirst()
+                        .orElseThrow(() -> new MavlinkSerializationException(
+                                "Message " + type.getName() + " does not have a builder"))
+        );
+
         Object builder;
         try {
-            builder = BUILDERS.get(messageType).invoke(null);
+            builder = builderMethod.invoke(null);
         } catch (IllegalAccessException | InvocationTargetException e) {
             throw serializationFailure("Unable to create builder for " + messageType.getName(), e);
         }
 
+        List<DeserializedField> deserializedFields = FIELDS.computeIfAbsent(builder.getClass(), builderType -> {
+            List<DeserializedField> fields = new ArrayList<>();
+            Arrays.stream(builderType.getMethods())
+                    .filter(method -> method.isAnnotationPresent(MavlinkFieldInfo.class))
+                    .forEach(method -> {
+                        Type[] parameterTypes = method.getGenericParameterTypes();
+                        if (parameterTypes.length != 1) {
+                            throw new MavlinkSerializationException(
+                                    "Method " + method.getName() + " of " + builderType.getName()
+                                            + " is annotated with @MavlinkFieldInfo, however does not "
+                                            + "accept a single parameter.");
+                        }
+                        fields.add(new DeserializedField(method,
+                                method.getAnnotation(MavlinkFieldInfo.class), parameterTypes[0]));
+                    });
+            fields.sort((a, b) -> wireComparator.compare(a.info, b.info));
+            return fields;
+        });
+
         int offset = 0;
-        for (DeserializedField deserializedField : FIELDS.get(builder.getClass())) {
+        for (DeserializedField deserializedField : deserializedFields) {
             MavlinkFieldInfo field = deserializedField.info;
             int length = field.unitSize() * Math.max(field.arraySize(), 1);
             byte[] data = new byte[length];
